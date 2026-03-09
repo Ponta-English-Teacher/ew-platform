@@ -11,6 +11,11 @@ export default function StudentJoinPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleJoin = async () => {
+    if (!studentId.trim() || !realName.trim()) {
+      alert("Please enter Student ID and Real Name.");
+      return;
+    }
+
     const { data: classData, error: classError } = await supabase
       .from("ew_classes")
       .select("*")
@@ -28,6 +33,32 @@ export default function StudentJoinPage() {
       return;
     }
 
+    const { data: existingStudent, error: existingError } = await supabase
+      .from("ew_students")
+      .select("*")
+      .eq("class_id", classData.id)
+      .eq("student_id", studentId)
+      .single();
+
+    if (existingStudent) {
+      const studentRecord = {
+        id: existingStudent.id,
+        class_id: existingStudent.class_id,
+        student_id: existingStudent.student_id,
+        anonymous_label: existingStudent.anonymous_label,
+      };
+
+      localStorage.setItem("ew_student", JSON.stringify(studentRecord));
+      window.location.href = `/student/discussion/${classData.id}`;
+      return;
+    }
+
+    if (existingError && existingError.code !== "PGRST116") {
+      alert("Could not check existing student.");
+      console.error(existingError);
+      return;
+    }
+
     const { data: existingStudents, error: countError } = await supabase
       .from("ew_students")
       .select("id")
@@ -42,22 +73,32 @@ export default function StudentJoinPage() {
     const nextNumber = (existingStudents?.length || 0) + 1;
     const anonymousLabel = `S${String(nextNumber).padStart(2, "0")}`;
 
-    const { error: studentError } = await supabase
+    const { data: insertedStudent, error: studentError } = await supabase
       .from("ew_students")
       .insert({
         class_id: classData.id,
         student_id: studentId,
         real_name: realName,
         anonymous_label: anonymousLabel,
-      });
+      })
+      .select()
+      .single();
 
-    if (studentError) {
+    if (studentError || !insertedStudent) {
       alert("Could not join class");
       console.error(studentError);
       return;
     }
 
-    alert(`Joined successfully as ${anonymousLabel}!`);
+    const studentRecord = {
+      id: insertedStudent.id,
+      class_id: insertedStudent.class_id,
+      student_id: insertedStudent.student_id,
+      anonymous_label: insertedStudent.anonymous_label,
+    };
+
+    localStorage.setItem("ew_student", JSON.stringify(studentRecord));
+    window.location.href = `/student/discussion/${classData.id}`;
   };
 
   return (
