@@ -47,6 +47,31 @@ export default function StudentDiscussionPage({
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
   const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null);
+  
+  useEffect(() => {
+  const loadLanes = async () => {
+    const { data, error } = await supabase
+      .from("ew_lanes")
+      .select("*")
+      .eq("class_id", classId)
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setLanes((data || []) as Lane[]);
+
+    if (data && data.length > 0) {
+      setSelectedLaneId(data[0].id);
+    }
+  };
+
+  if (classId) {
+    loadLanes();
+  }
+}, [classId]);
 
   useEffect(() => {
     const loadParams = async () => {
