@@ -47,31 +47,38 @@ export default function StudentDiscussionPage({
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
   const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null);
-  
+  const [totalPostCount, setTotalPostCount] = useState(0);
+  const [maxTotalPosts, setMaxTotalPosts] = useState<number | null>(null);
+  const [languageLevel, setLanguageLevel] = useState("B1");
+
+  // AI suggestion state
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+
   useEffect(() => {
-  const loadLanes = async () => {
-    const { data, error } = await supabase
-      .from("ew_lanes")
-      .select("*")
-      .eq("class_id", classId)
-      .order("sort_order", { ascending: true });
+    const loadLanes = async () => {
+      const { data, error } = await supabase
+        .from("ew_lanes")
+        .select("*")
+        .eq("class_id", classId)
+        .order("sort_order", { ascending: true });
 
-    if (error) {
-      console.error(error);
-      return;
+      if (error) {
+        console.error(error);
+        return;
+      }
+
+      setLanes((data || []) as Lane[]);
+
+      if (data && data.length > 0) {
+        setSelectedLaneId(data[0].id);
+      }
+    };
+
+    if (classId) {
+      loadLanes();
     }
-
-    setLanes((data || []) as Lane[]);
-
-    if (data && data.length > 0) {
-      setSelectedLaneId(data[0].id);
-    }
-  };
-
-  if (classId) {
-    loadLanes();
-  }
-}, [classId]);
+  }, [classId]);
 
   useEffect(() => {
     const loadParams = async () => {
@@ -107,10 +114,23 @@ export default function StudentDiscussionPage({
       }
 
       const stored = localStorage.getItem("ew_student");
-
       if (stored) {
         const student = JSON.parse(stored) as Student;
         setCurrentStudent(student);
+      }
+
+      // Load max_total_posts and language_level from ew_classes
+      const { data: classData } = await supabase
+        .from("ew_classes")
+        .select("max_total_posts, language_level")
+        .eq("id", classId)
+        .single();
+
+      if (classData) {
+        setMaxTotalPosts(classData.max_total_posts);
+        if (classData.language_level) {
+          setLanguageLevel(classData.language_level);
+        }
       }
 
       setLoading(false);
@@ -118,6 +138,15 @@ export default function StudentDiscussionPage({
 
     loadInitialData();
   }, [classId]);
+
+  const refreshTotalCount = async () => {
+    if (!classId) return;
+    const { data } = await supabase
+      .from("ew_posts")
+      .select("id")
+      .eq("class_id", classId);
+    setTotalPostCount(data?.length || 0);
+  };
 
   useEffect(() => {
     if (!selectedLaneId) return;
@@ -135,6 +164,7 @@ export default function StudentDiscussionPage({
       }
 
       setPosts((data || []) as Post[]);
+      await refreshTotalCount();
     };
 
     loadPosts();
@@ -198,6 +228,34 @@ export default function StudentDiscussionPage({
     }
 
     setPosts((data || []) as Post[]);
+    await refreshTotalCount();
+  };
+
+  const handleAIHelper = async (mode: "how-to-say-it" | "correct-mistakes") => {
+    if (!newPost.trim()) {
+      alert("Please write something first.");
+      return;
+    }
+    setSuggestion(null);
+    setSuggestionLoading(true);
+
+    try {
+      const res = await fetch(`/api/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft: newPost.trim(), languageLevel }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert("Could not get suggestion. Please try again.");
+      } else {
+        setSuggestion(data.suggestion || "");
+      }
+    } catch {
+      alert("Could not reach the assistant. Please try again.");
+    }
+
+    setSuggestionLoading(false);
   };
 
   const handlePost = async () => {
@@ -218,6 +276,41 @@ export default function StudentDiscussionPage({
 
     setPosting(true);
 
+    // Check max_total_posts limit
+    const { data: classData, error: classError } = await supabase
+      .from("ew_classes")
+      .select("max_total_posts")
+      .eq("id", classId)
+      .single();
+
+    if (classError || !classData) {
+      console.error(classError);
+      alert("Could not verify class settings.");
+      setPosting(false);
+      return;
+    }
+
+    const { data: allClassPosts, error: totalCountError } = await supabase
+      .from("ew_posts")
+      .select("id")
+      .eq("class_id", classId);
+
+    if (totalCountError) {
+      console.error(totalCountError);
+      alert("Could not count posts.");
+      setPosting(false);
+      return;
+    }
+
+    const totalPosts = allClassPosts?.length || 0;
+
+    if (totalPosts >= classData.max_total_posts) {
+      alert("Discussion limit reached.");
+      setPosting(false);
+      return;
+    }
+
+    // Count posts in this lane for post_number
     const { data: existingPosts, error: countError } = await supabase
       .from("ew_posts")
       .select("id")
@@ -253,6 +346,7 @@ export default function StudentDiscussionPage({
 
     setNewPost("");
     setReplyToPostId(null);
+    setSuggestion(null);
     setPosting(false);
   };
 
@@ -311,6 +405,11 @@ export default function StudentDiscussionPage({
         {currentStudent && (
           <p className="mt-1 text-sm font-medium text-gray-700">
             You are {currentStudent.anonymous_label}
+          </p>
+        )}
+        {maxTotalPosts !== null && (
+          <p className="mt-1 text-sm font-medium text-gray-700">
+            Posts: {totalPostCount} / {maxTotalPosts}
           </p>
         )}
       </div>
@@ -495,11 +594,58 @@ export default function StudentDiscussionPage({
 
                 <textarea
                   value={newPost}
-                  onChange={(e) => setNewPost(e.target.value)}
+                  onChange={(e) => {
+                    setNewPost(e.target.value);
+                    setSuggestion(null);
+                  }}
                   placeholder="Write your answer here..."
                   rows={4}
                   className="w-full rounded-xl border border-gray-300 bg-white p-3 text-black outline-none focus:border-gray-500"
                 />
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAIHelper("how-to-say-it")}
+                    disabled={suggestionLoading}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-white disabled:opacity-50"
+                  >
+                    {suggestionLoading ? "Thinking..." : "How to say it"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAIHelper("correct-mistakes")}
+                    disabled={suggestionLoading}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-white disabled:opacity-50"
+                  >
+                    {suggestionLoading ? "Thinking..." : "Correct Mistakes"}
+                  </button>
+                </div>
+
+                {suggestion !== null && (
+                  <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{suggestion}</p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewPost(suggestion);
+                          setSuggestion(null);
+                        }}
+                        className="rounded-lg bg-black px-3 py-1 text-sm text-white hover:bg-gray-800"
+                      >
+                        Use Suggestion
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSuggestion(null)}
+                        className="rounded-lg border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-white"
+                      >
+                        Keep Mine
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"

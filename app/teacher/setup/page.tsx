@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 
 type RosterRow = {
@@ -8,11 +8,50 @@ type RosterRow = {
   real_name: string;
 };
 
+type LaneConfig = {
+  title: string;
+  prompt: string;
+};
+
+type ChatMessage = {
+  role: "teacher" | "ai";
+  content: string;
+};
+
+const defaultLanes: LaneConfig[] = [
+  { title: "", prompt: "" },
+  { title: "", prompt: "" },
+  { title: "", prompt: "" },
+  { title: "", prompt: "" },
+];
+
+const laneKeys = ["A", "B", "C", "D"];
+
+const languageLevelOptions = ["A1", "A2", "B1", "B2", "Advanced"];
+
+function parseAIResponse(text: string): LaneConfig[] | null {
+  const result: LaneConfig[] = [];
+  for (const key of laneKeys) {
+    const titleMatch = text.match(new RegExp(`Lane ${key} Title:\\s*(.+)`));
+    const promptMatch = text.match(new RegExp(`Lane ${key} Prompt:\\s*(.+)`));
+    if (!titleMatch || !promptMatch) return null;
+    result.push({
+      title: titleMatch[1].trim(),
+      prompt: promptMatch[1].trim(),
+    });
+  }
+  return result;
+}
+
 export default function TeacherSetupPage() {
   const [className, setClassName] = useState("");
   const [classCode, setClassCode] = useState("");
   const [password, setPassword] = useState("");
+  const [languageLevel, setLanguageLevel] = useState("B1");
+  const [maxTotalPosts, setMaxTotalPosts] = useState(80);
   const [creating, setCreating] = useState(false);
+
+  const [lanes, setLanes] = useState<LaneConfig[]>(defaultLanes);
 
   const [createdClassId, setCreatedClassId] = useState<string | null>(null);
   const [savingRoster, setSavingRoster] = useState(false);
@@ -23,86 +62,145 @@ export default function TeacherSetupPage() {
     { student_id: "", real_name: "" },
   ]);
 
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [lastAIResponse, setLastAIResponse] = useState<string | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, chatLoading]);
+
+  const handleSendChat = async () => {
+    const message = chatInput.trim();
+    if (!message || chatLoading) return;
+
+    const updated: ChatMessage[] = [
+      ...chatMessages,
+      { role: "teacher", content: message },
+    ];
+    setChatMessages(updated);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const res = await fetch("/api/topic-discussion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teacherMessage: message, languageLevel }),
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+        setChatMessages([
+          ...updated,
+          { role: "ai", content: "Error: " + data.error },
+        ]);
+        setChatLoading(false);
+        return;
+      }
+
+      const aiText: string = data.result || "";
+      setChatMessages([...updated, { role: "ai", content: aiText }]);
+      setLastAIResponse(aiText);
+    } catch {
+      setChatMessages([
+        ...updated,
+        { role: "ai", content: "Error: Could not reach the AI assistant." },
+      ]);
+    }
+
+    setChatLoading(false);
+  };
+
+  const handleApplyAISuggestion = () => {
+    if (!lastAIResponse) return;
+    const parsed = parseAIResponse(lastAIResponse);
+    if (!parsed) {
+      alert("Could not parse AI suggestion. Please try again.");
+      return;
+    }
+    setLanes(parsed);
+    alert("Lane titles and prompts have been applied.");
+  };
+
+  const handleLaneChange = (index: number, field: keyof LaneConfig, value: string) => {
+    const updated = [...lanes];
+    updated[index][field] = value;
+    setLanes(updated);
+  };
+
   const handleCreate = async () => {
-  if (!className.trim() || !classCode.trim() || !password.trim()) {
-    alert("Please fill all fields.");
-    return;
-  }
+    if (!className.trim() || !classCode.trim() || !password.trim()) {
+      alert("Please fill all fields.");
+      return;
+    }
 
-  setCreating(true);
+    for (let i = 0; i < lanes.length; i++) {
+      if (!lanes[i].title.trim() || !lanes[i].prompt.trim()) {
+        alert(`Please fill in the title and prompt for Lane ${laneKeys[i]}.`);
+        return;
+      }
+    }
 
-  const { data, error } = await supabase
-    .from("ew_classes")
-    .insert({
-      activity_title: className.trim(),
-      class_code: classCode.trim(),
-      join_password: password.trim(),
-      teacher_id: "eguchi",
-      status: "active",
-      min_words: 15,
-      max_words: 40,
-      max_posts_per_lane: 20,
-      lane_count: 4,
-    })
-    .select()
-    .single();
+    if (!maxTotalPosts || maxTotalPosts < 1) {
+      alert("Please enter a valid Maximum Total Posts value.");
+      return;
+    }
 
-  if (error || !data) {
+    setCreating(true);
+
+    const { data, error } = await supabase
+      .from("ew_classes")
+      .insert({
+        activity_title: className.trim(),
+        class_code: classCode.trim(),
+        join_password: password.trim(),
+        teacher_id: "eguchi",
+        status: "active",
+        min_words: 15,
+        max_words: 40,
+        max_posts_per_lane: 20,
+        lane_count: 4,
+        language_level: languageLevel,
+        max_total_posts: maxTotalPosts,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      setCreating(false);
+      console.error(error);
+      alert("Could not create class. Try a new class code.");
+      return;
+    }
+
+    const laneRows = lanes.map((lane, index) => ({
+      class_id: data.id,
+      lane_key: laneKeys[index],
+      lane_title: lane.title.trim(),
+      head_post: lane.prompt.trim(),
+      max_posts: 20,
+      sort_order: index + 1,
+    }));
+
+    const { error: laneError } = await supabase.from("ew_lanes").insert(laneRows);
+
     setCreating(false);
-    console.error(error);
-    alert("Could not create class. Try a new class code.");
-    return;
-  }
 
-  const laneRows = [
-    {
-      class_id: data.id,
-      lane_key: "A",
-      lane_title: "Everyday Life",
-      head_post: "What interesting thing happened to you recently?",
-      max_posts: 20,
-      sort_order: 1,
-    },
-    {
-      class_id: data.id,
-      lane_key: "B",
-      lane_title: "Hobbies",
-      head_post: "What hobby do you enjoy the most?",
-      max_posts: 20,
-      sort_order: 2,
-    },
-    {
-      class_id: data.id,
-      lane_key: "C",
-      lane_title: "University Life",
-      head_post: "What is something you like or dislike about university life?",
-      max_posts: 20,
-      sort_order: 3,
-    },
-    {
-      class_id: data.id,
-      lane_key: "D",
-      lane_title: "Future Plans",
-      head_post: "What do you want to do in the future?",
-      max_posts: 20,
-      sort_order: 4,
-    },
-  ];
+    if (laneError) {
+      console.error(laneError);
+      alert("Class was created, but lanes could not be created.");
+      setCreatedClassId(data.id);
+      return;
+    }
 
-  const { error: laneError } = await supabase.from("ew_lanes").insert(laneRows);
-
-  setCreating(false);
-
-  if (laneError) {
-    console.error(laneError);
-    alert("Class was created, but lanes could not be created.");
     setCreatedClassId(data.id);
-    return;
-  }
+    alert("Class and lanes created successfully.");
+  };
 
-  setCreatedClassId(data.id);
-  alert("Class and lanes created successfully.");
-};
   const handleRosterChange = (
     index: number,
     field: keyof RosterRow,
@@ -144,7 +242,6 @@ export default function TeacherSetupPage() {
           .split("\t")
           .map((part) => part.trim())
           .filter((part) => part.length > 0);
-
         if (parts.length >= 2) {
           student_id = parts[0];
           real_name = parts.slice(1).join(" ");
@@ -233,6 +330,8 @@ export default function TeacherSetupPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-8 text-black">
       <div className="mx-auto max-w-5xl space-y-8">
+
+        {/* Class Info */}
         <div className="rounded-2xl border bg-white p-6 shadow">
           <h1 className="mb-6 text-2xl font-bold">Teacher Setup</h1>
 
@@ -268,6 +367,143 @@ export default function TeacherSetupPage() {
             </div>
           </div>
 
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium">Language Level</label>
+              <select
+                value={languageLevel}
+                onChange={(e) => setLanguageLevel(e.target.value)}
+                className="mt-1 w-full rounded border p-2"
+              >
+                {languageLevelOptions.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Maximum Total Posts</label>
+              <input
+                type="number"
+                min={1}
+                value={maxTotalPosts}
+                onChange={(e) => setMaxTotalPosts(Number(e.target.value))}
+                className="mt-1 w-full rounded border p-2"
+                placeholder="80"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* AI Topic Assistant */}
+        <div className="rounded-2xl border bg-white p-6 shadow">
+          <h2 className="mb-1 text-xl font-bold">AI Topic Assistant</h2>
+          <p className="mb-4 text-sm text-gray-500">
+            Discuss topic ideas with the AI. When you are happy with a suggestion, click Apply to fill in the lane fields below.
+          </p>
+
+          <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 h-72 overflow-y-auto">
+            {chatMessages.length === 0 && (
+              <p className="text-sm text-gray-400">
+                No messages yet. Type an idea below to get started.
+              </p>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div
+                key={i}
+                className={`rounded-xl px-4 py-3 text-sm whitespace-pre-wrap ${
+                  msg.role === "teacher"
+                    ? "bg-black text-white ml-8"
+                    : "bg-white border border-gray-200 text-gray-800 mr-8"
+                }`}
+              >
+                <span className="block text-xs font-semibold mb-1 opacity-60">
+                  {msg.role === "teacher" ? "You" : "AI Assistant"}
+                </span>
+                {msg.content}
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-400 mr-8">
+                <span className="block text-xs font-semibold mb-1 opacity-60">AI Assistant</span>
+                Thinking...
+              </div>
+            )}
+            <div ref={chatBottomRef} />
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendChat();
+                }
+              }}
+              placeholder="e.g. Let's do something about food and daily life."
+              className="flex-1 rounded border p-2 text-sm"
+              disabled={chatLoading}
+            />
+            <button
+              type="button"
+              onClick={handleSendChat}
+              disabled={chatLoading}
+              className="rounded bg-black px-4 py-2 text-sm text-white disabled:bg-gray-400"
+            >
+              {chatLoading ? "Sending..." : "Send"}
+            </button>
+          </div>
+
+          {lastAIResponse && (
+            <button
+              type="button"
+              onClick={handleApplyAISuggestion}
+              className="mt-3 rounded border border-green-600 px-4 py-2 text-sm text-green-700 hover:bg-green-50"
+            >
+              Apply Last Suggestion to Lanes
+            </button>
+          )}
+        </div>
+
+        {/* Lane Configuration */}
+        <div className="rounded-2xl border bg-white p-6 shadow">
+          <h2 className="mb-4 text-xl font-bold">Lane Configuration</h2>
+          <p className="mb-4 text-sm text-gray-500">
+            Define the title and discussion prompt for each lane. All 4 lanes are required.
+          </p>
+
+          <div className="space-y-4">
+            {lanes.map((lane, index) => (
+              <div key={index} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="mb-3 text-sm font-semibold text-gray-700">Lane {laneKeys[index]}</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Title</label>
+                    <input
+                      value={lane.title}
+                      onChange={(e) => handleLaneChange(index, "title", e.target.value)}
+                      className="mt-1 w-full rounded border p-2"
+                      placeholder={`Lane ${laneKeys[index]} title`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Prompt</label>
+                    <input
+                      value={lane.prompt}
+                      onChange={(e) => handleLaneChange(index, "prompt", e.target.value)}
+                      className="mt-1 w-full rounded border p-2"
+                      placeholder={`Discussion prompt for Lane ${laneKeys[index]}`}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
           <button
             onClick={handleCreate}
             disabled={creating}
@@ -283,6 +519,7 @@ export default function TeacherSetupPage() {
           )}
         </div>
 
+        {/* Student Roster */}
         <div className="rounded-2xl border bg-white p-6 shadow">
           <h2 className="mb-4 text-xl font-bold">Student Roster</h2>
 
@@ -377,6 +614,7 @@ export default function TeacherSetupPage() {
             Create the class first, then import or edit the roster, then save it.
           </p>
         </div>
+
       </div>
     </div>
   );
