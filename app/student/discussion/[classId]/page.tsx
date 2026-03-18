@@ -38,6 +38,8 @@ export default function StudentDiscussionPage({
   params: Promise<{ classId: string }>;
 }) {
   const [classId, setClassId] = useState("");
+  const [activityTitle, setActivityTitle] = useState("");
+  const [classCode, setClassCode] = useState("");
   const [lanes, setLanes] = useState<Lane[]>([]);
   const [selectedLaneId, setSelectedLaneId] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
@@ -119,14 +121,16 @@ export default function StudentDiscussionPage({
         setCurrentStudent(student);
       }
 
-      // Load max_total_posts and language_level from ew_classes
+      // Load class info
       const { data: classData } = await supabase
         .from("ew_classes")
-        .select("max_total_posts, language_level")
+        .select("activity_title, class_code, max_total_posts, language_level")
         .eq("id", classId)
         .single();
 
       if (classData) {
+        setActivityTitle(classData.activity_title || "");
+        setClassCode(classData.class_code || "");
         setMaxTotalPosts(classData.max_total_posts);
         if (classData.language_level) {
           setLanguageLevel(classData.language_level);
@@ -399,9 +403,11 @@ export default function StudentDiscussionPage({
     <div className="min-h-screen overflow-x-hidden bg-gray-50 p-6 text-black">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">
-          EW Discussion Platform
+          {activityTitle || "EW Discussion Platform"}
         </h1>
-        <p className="mt-2 break-all text-sm text-gray-600">Class ID: {classId}</p>
+        {classCode && (
+          <p className="mt-1 text-sm text-gray-500">Class Code: {classCode}</p>
+        )}
         {currentStudent && (
           <p className="mt-1 text-sm font-medium text-gray-700">
             You are {currentStudent.anonymous_label}
