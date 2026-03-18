@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase } from "../../../../lib/supabaseClient";
 
 type Lane = {
@@ -417,6 +418,14 @@ export default function StudentDiscussionPage({
           <p className="mt-1 text-sm font-medium text-gray-700">
             Posts: {totalPostCount} / {maxTotalPosts}
           </p>
+        )}
+        {classId && (
+          <Link
+            href={`/student/record/${classId}`}
+            className="mt-3 inline-block rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+          >
+            My Record
+          </Link>
         )}
       </div>
 
