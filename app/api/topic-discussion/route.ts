@@ -1,8 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 
+type ChatMessage = {
+  role: "teacher" | "ai";
+  content: string;
+};
+
+// How many recent chat turns to include for context.
+// Enough to follow the conversation without confusing the model.
+const HISTORY_TURNS = 6;
+
 export async function POST(req: NextRequest) {
   try {
-    const { teacherMessage, languageLevel } = await req.json();
+    const {
+      teacherMessage,
+      languageLevel,
+      chatMessages,
+    }: {
+      teacherMessage: string;
+      languageLevel: string;
+      chatMessages?: ChatMessage[];
+    } = await req.json();
 
     if (!teacherMessage || !languageLevel) {
       return NextResponse.json(
@@ -11,25 +28,70 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const systemPrompt = `You are a discussion design assistant for university English teachers.
-The teacher is designing a lane-based classroom discussion activity.
-The students' English level is ${languageLevel}.
+    // ── System prompt ──────────────────────────────────────────────────────
+    // Design notes:
+    // - "Lane generator" framing (not chatbot/partner) prevents question-asking
+    // - Prohibitions listed explicitly — the model needs to see "never ask"
+    // - Language level guidance avoids over-simplification at higher levels
+    // - No revision logic — every response is a fresh full proposal
 
-Your job is to suggest exactly 4 lane titles and 4 lane prompts based on the teacher's ideas.
-Each prompt should be a single discussion question appropriate for ${languageLevel} level university students.
-Keep titles short (2-4 words). Keep prompts clear and natural.
+    const systemPrompt = `You are a lane generator for English classroom discussion activities.
+You are not a chatbot. You do not ask questions. You do not explain your output.
 
-You must always respond in exactly this format and nothing else:
+The teacher is designing a lane-based discussion task for ${languageLevel} level university students.
+Your job is to generate exactly 4 discussion lanes based on the teacher's input.
+
+RULES:
+- Always output exactly 4 lanes
+- Never ask the teacher a question
+- Never add any text outside the required format
+- Never add greetings, explanations, or commentary
+- If the teacher's input is vague, make a reasonable decision and generate lanes immediately
+
+LANE DESIGN:
+- All 4 lanes must share one central topic
+- Each lane must explore a different angle of that topic (e.g. personal / social / practical / critical)
+- Each lane must be independently answerable — no lane should depend on another lane's answer
+- Do not create sequential questions (A → B → C → D is wrong)
+
+LANGUAGE LEVEL (${languageLevel}):
+- A1/A2: Short sentences, basic vocabulary, present tense preferred
+- B1: Clear natural language, everyday vocabulary, simple structures
+- B2: Natural language, moderate complexity, some nuance is fine
+- Advanced: Fluent natural language — do NOT oversimplify, it creates ambiguity
+
+OUTPUT FORMAT — output this and nothing else:
 Lane A Title: ...
 Lane A Prompt: ...
+
 Lane B Title: ...
 Lane B Prompt: ...
+
 Lane C Title: ...
 Lane C Prompt: ...
-Lane D Title: ...
-Lane D Prompt: ...
 
-Do not include any extra text, explanation, or formatting outside of this structure.`;
+Lane D Title: ...
+Lane D Prompt: ...`;
+
+    // ── Message history ────────────────────────────────────────────────────
+    // Include recent turns so the AI knows what topic has been discussed.
+    // Trim to last N turns to avoid context bloat.
+    // The current teacher message is added separately as the final user turn.
+
+    const recentHistory = (chatMessages || [])
+      .slice(-HISTORY_TURNS)
+      .map((msg) => ({
+        role: msg.role === "teacher" ? "user" : ("assistant" as const),
+        content: msg.content,
+      }));
+
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      ...recentHistory,
+      { role: "user" as const, content: teacherMessage },
+    ];
+
+    // ── OpenAI call ────────────────────────────────────────────────────────
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -39,11 +101,8 @@ Do not include any extra text, explanation, or formatting outside of this struct
       },
       body: JSON.stringify({
         model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: teacherMessage },
-        ],
-        temperature: 0.7,
+        messages,
+        temperature: 0.6,
       }),
     });
 
@@ -57,7 +116,7 @@ Do not include any extra text, explanation, or formatting outside of this struct
     }
 
     const data = await response.json();
-    const aiText = data.choices?.[0]?.message?.content || "";
+    const aiText: string = data.choices?.[0]?.message?.content || "";
 
     return NextResponse.json({ result: aiText });
   } catch (err) {

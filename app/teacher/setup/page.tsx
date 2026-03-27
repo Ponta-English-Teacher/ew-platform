@@ -153,22 +153,23 @@ export default function TeacherSetupPage() {
     setCreating(true);
 
     const { data, error } = await supabase
-      .from("ew_classes")
-      .insert({
-        activity_title: className.trim(),
-        class_code: classCode.trim(),
-        join_password: password.trim(),
-        teacher_id: "eguchi",
-        status: "active",
-        min_words: 15,
-        max_words: 40,
-        max_posts_per_lane: 20,
-        lane_count: 4,
-        language_level: languageLevel,
-        max_total_posts: maxTotalPosts,
-      })
-      .select()
-      .single();
+  .from("ew_classes")
+  .insert({
+    activity_title: className.trim(),
+    class_code: classCode.trim(),
+    join_password: password.trim(),
+    teacher_id: "eguchi",
+    status: "active",
+    min_words: 15,
+    max_words: 40,
+    max_posts_per_lane: 50,
+    lane_count: 4,
+    language_level: languageLevel,
+    max_total_posts: maxTotalPosts,
+    course_id: "f384830c-f07e-4ea4-8d94-db4e8bb58d2d",
+  })
+  .select()
+  .single();
 
     if (error || !data) {
       setCreating(false);
