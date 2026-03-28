@@ -95,7 +95,9 @@ export default function StudentSessionsPage() {
       localStorage.setItem("ew_student", JSON.stringify(studentRecord));
       console.log("SAVED ew_student:", localStorage.getItem("ew_student"));
 
-      window.location.href = `/student/discussion/${sessionId}`;
+      setTimeout(() => {
+  window.location.href = `/student/discussion/${sessionId}`;
+}, 100);
       return;
     }
 
@@ -141,7 +143,9 @@ export default function StudentSessionsPage() {
     };
 
     localStorage.setItem("ew_student", JSON.stringify(studentRecord));
-    window.location.href = `/student/discussion/${sessionId}`;
+    setTimeout(() => {
+  window.location.href = `/student/discussion/${sessionId}`;
+}, 100);
   };
 
   return (
