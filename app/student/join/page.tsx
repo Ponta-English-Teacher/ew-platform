@@ -47,6 +47,16 @@ export default function StudentJoinPage() {
     }
 
     setOfficialName(rosterData.real_name);
+
+    localStorage.setItem(
+      "ew_join_course",
+      JSON.stringify({
+        course_id: courseData.id,
+        course_code: courseCode.trim(),
+        student_id: studentId.trim(),
+        real_name: rosterData.real_name,
+      })
+    );
   };
 
   const handleJoin = async () => {
