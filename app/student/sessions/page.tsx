@@ -18,6 +18,14 @@ type JoinedCourse = {
   real_name: string;
 };
 
+type StudentRecord = {
+  id: string;
+  class_id: string;
+  student_id: string;
+  anonymous_label: string;
+  real_name: string;
+};
+
 export default function StudentSessionsPage() {
   const [courseId, setCourseId] = useState("");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -76,7 +84,7 @@ export default function StudentSessionsPage() {
       .single();
 
     if (existingStudent) {
-      const studentRecord = {
+      const studentRecord: StudentRecord = {
         id: existingStudent.id,
         class_id: existingStudent.class_id,
         student_id: existingStudent.student_id,
@@ -129,7 +137,7 @@ export default function StudentSessionsPage() {
       return;
     }
 
-    const studentRecord = {
+    const studentRecord: StudentRecord = {
       id: insertedStudent.id,
       class_id: insertedStudent.class_id,
       student_id: insertedStudent.student_id,
