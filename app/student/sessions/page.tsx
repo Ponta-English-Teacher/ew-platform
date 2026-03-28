@@ -93,14 +93,9 @@ export default function StudentSessionsPage() {
       };
 
       localStorage.setItem("ew_student", JSON.stringify(studentRecord));
-      window.location.href = `/student/discussion/${sessionId}`;
-      return;
-    }
+      console.log("SAVED ew_student:", localStorage.getItem("ew_student"));
 
-    if (existingError && existingError.code !== "PGRST116") {
-      console.error(existingError);
-      alert("Could not check existing student.");
-      setEnteringSessionId(null);
+      window.location.href = `/student/discussion/${sessionId}`;
       return;
     }
 
