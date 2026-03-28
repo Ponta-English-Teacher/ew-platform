@@ -80,11 +80,20 @@ export default function StudentDiscussionPage({
     const loadInitialData = async () => {
       setLoading(true);
 
-      const stored = localStorage.getItem("ew_student");
-      if (stored) {
-        const student = JSON.parse(stored) as Student;
-        setCurrentStudent(student);
-      }
+const stored = localStorage.getItem("ew_student");
+
+console.log("DEBUG ew_student:", stored);
+
+if (stored) {
+  try {
+    const student = JSON.parse(stored) as Student;
+    setCurrentStudent(student);
+  } catch (e) {
+    console.error("Failed to parse ew_student", e);
+  }
+} else {
+  console.warn("No ew_student found in localStorage");
+}
 
       const { data: classData } = await supabase
         .from("ew_classes")
