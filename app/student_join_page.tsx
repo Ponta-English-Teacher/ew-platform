@@ -4,7 +4,7 @@ import { useState } from "react";
 import { supabase } from "../../../lib/supabaseClient";
 
 export default function StudentJoinPage() {
-  const [courseCode, setCourseCode] = useState("");
+  const [classCode, setClassCode] = useState("");
   const [joinPassword, setJoinPassword] = useState("");
   const [studentId, setStudentId] = useState("");
   const [officialName, setOfficialName] = useState("");
@@ -15,27 +15,33 @@ export default function StudentJoinPage() {
   const lookupRosterName = async () => {
     setOfficialName("");
 
-    if (!courseCode.trim() || !studentId.trim()) {
+    if (!classCode.trim() || !studentId.trim()) {
       return;
     }
 
     setLookingUp(true);
 
-    const { data: courseData, error: courseError } = await supabase
-      .from("ew_courses")
-      .select("id")
-      .eq("course_code", courseCode.trim())
+    const { data: classData, error: classError } = await supabase
+      .from("ew_classes")
+      .select("id, course_id")
+      .eq("class_code", classCode.trim())
       .single();
 
-    if (courseError || !courseData) {
+    if (classError || !classData) {
       setLookingUp(false);
+      return;
+    }
+
+    if (!classData.course_id) {
+      setLookingUp(false);
+      setOfficialName("");
       return;
     }
 
     const { data: rosterData, error: rosterError } = await supabase
       .from("ew_course_roster")
       .select("real_name")
-      .eq("course_id", courseData.id)
+      .eq("course_id", classData.course_id)
       .eq("student_id", studentId.trim())
       .single();
 
@@ -50,29 +56,35 @@ export default function StudentJoinPage() {
   };
 
   const handleJoin = async () => {
-    if (!courseCode.trim() || !joinPassword.trim() || !studentId.trim()) {
-      alert("Please enter Course Code, Join Password, and Student ID.");
+    if (!classCode.trim() || !joinPassword.trim() || !studentId.trim()) {
+      alert("Please enter Class Code, Join Password, and Student ID.");
       return;
     }
 
     setJoining(true);
     setOfficialName("");
 
-    const { data: courseData, error: courseError } = await supabase
-      .from("ew_courses")
+    const { data: classData, error: classError } = await supabase
+      .from("ew_classes")
       .select("*")
-      .eq("course_code", courseCode.trim())
+      .eq("class_code", classCode.trim())
       .single();
 
-    if (courseError || !courseData) {
-      console.error(courseError);
-      alert("Course not found.");
+    if (classError || !classData) {
+      console.error(classError);
+      alert("Class not found.");
       setJoining(false);
       return;
     }
 
-    if (courseData.course_password !== joinPassword.trim()) {
+    if (classData.join_password !== joinPassword.trim()) {
       alert("Incorrect password.");
+      setJoining(false);
+      return;
+    }
+
+    if (!classData.course_id) {
+      alert("This session is not connected to a course roster yet.");
       setJoining(false);
       return;
     }
@@ -80,7 +92,7 @@ export default function StudentJoinPage() {
     const { data: rosterData, error: rosterError } = await supabase
       .from("ew_course_roster")
       .select("*")
-      .eq("course_id", courseData.id)
+      .eq("course_id", classData.course_id)
       .eq("student_id", studentId.trim())
       .single();
 
@@ -93,17 +105,77 @@ export default function StudentJoinPage() {
 
     setOfficialName(rosterData.real_name);
 
-    localStorage.setItem(
-      "ew_join_course",
-      JSON.stringify({
-        course_id: courseData.id,
-        course_code: courseData.course_code,
+    const { data: existingStudent, error: existingError } = await supabase
+      .from("ew_students")
+      .select("*")
+      .eq("class_id", classData.id)
+      .eq("student_id", studentId.trim())
+      .single();
+
+    if (existingStudent) {
+      const studentRecord = {
+        id: existingStudent.id,
+        class_id: existingStudent.class_id,
+        student_id: existingStudent.student_id,
+        anonymous_label: existingStudent.anonymous_label,
+        real_name: existingStudent.real_name,
+      };
+
+      localStorage.setItem("ew_student", JSON.stringify(studentRecord));
+      window.location.href = `/student/discussion/${classData.id}`;
+      return;
+    }
+
+    if (existingError && existingError.code !== "PGRST116") {
+      console.error(existingError);
+      alert("Could not check existing student.");
+      setJoining(false);
+      return;
+    }
+
+    const { data: existingStudents, error: countError } = await supabase
+      .from("ew_students")
+      .select("id")
+      .eq("class_id", classData.id);
+
+    if (countError) {
+      console.error(countError);
+      alert("Could not count students.");
+      setJoining(false);
+      return;
+    }
+
+    const nextNumber = (existingStudents?.length || 0) + 1;
+    const anonymousLabel = `S${String(nextNumber).padStart(2, "0")}`;
+
+    const { data: insertedStudent, error: studentError } = await supabase
+      .from("ew_students")
+      .insert({
+        class_id: classData.id,
         student_id: studentId.trim(),
         real_name: rosterData.real_name,
+        anonymous_label: anonymousLabel,
       })
-    );
+      .select()
+      .single();
 
-    window.location.href = `/student/sessions?courseId=${courseData.id}`;
+    if (studentError || !insertedStudent) {
+      console.error(studentError);
+      alert("Could not join class.");
+      setJoining(false);
+      return;
+    }
+
+    const studentRecord = {
+      id: insertedStudent.id,
+      class_id: insertedStudent.class_id,
+      student_id: insertedStudent.student_id,
+      anonymous_label: insertedStudent.anonymous_label,
+      real_name: insertedStudent.real_name,
+    };
+
+    localStorage.setItem("ew_student", JSON.stringify(studentRecord));
+    window.location.href = `/student/discussion/${classData.id}`;
   };
 
   return (
@@ -112,20 +184,20 @@ export default function StudentJoinPage() {
         <h1 className="text-3xl font-bold text-gray-900">Student Join</h1>
 
         <p className="mt-2 text-sm text-gray-600">
-          Enter your course information to continue.
+          Enter your class information to join the discussion.
         </p>
 
         <form className="mt-8 space-y-5">
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-800">
-              Course Code
+              Class Code
             </label>
 
             <input
               type="text"
-              value={courseCode}
-              onChange={(e) => setCourseCode(e.target.value)}
-              placeholder="e.g. EW2026"
+              value={classCode}
+              onChange={(e) => setClassCode(e.target.value)}
+              placeholder="e.g. EW003"
               className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-black outline-none focus:border-gray-500"
             />
           </div>
@@ -203,7 +275,7 @@ export default function StudentJoinPage() {
             disabled={joining}
             className="w-full cursor-pointer rounded-xl bg-black px-4 py-3 text-white transition hover:bg-gray-800 active:scale-95 disabled:cursor-not-allowed disabled:bg-gray-400"
           >
-            {joining ? "Joining..." : "Continue to Sessions"}
+            {joining ? "Joining..." : "Join Discussion"}
           </button>
         </form>
       </div>

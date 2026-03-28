@@ -42,18 +42,18 @@ export default function TeacherCoursePage() {
   }, []);
 
   const handleCreate = async () => {
-   if (!courseTitle.trim() || !courseCode.trim() || !password.trim()) {
-  alert("Please fill in Course Name, Course Code, and Password.");
-  return;
-}
+    if (!courseTitle.trim() || !courseCode.trim()) {
+      alert("Please fill in Course Name and Course Code.");
+      return;
+    }
 
     setCreating(true);
 
-     const { error } = await supabase.from("ew_courses").insert({
+    const { error } = await supabase.from("ew_courses").insert({
       course_title: courseTitle.trim(),
       course_code: courseCode.trim(),
-      course_password: password.trim(),
-     });
+    });
+
     setCreating(false);
 
     if (error) {
