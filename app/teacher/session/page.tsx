@@ -18,14 +18,33 @@ export default function TeacherSessionPage() {
   const [course, setCourse] = useState<Course | null>(null);
 
   const [sessionTitle, setSessionTitle] = useState("");
-  const [sessionCode, setSessionCode] = useState("");
   const [creating, setCreating] = useState(false);
+  const [sessions, setSessions] = useState<any[]>([]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("courseId") || "";
     setCourseId(id);
   }, []);
+  useEffect(() => {
+  if (!courseId) return;
+
+  const loadSessions = async () => {
+    const { data, error } = await supabase
+      .from("ew_classes")
+      .select("id, activity_title")
+      .eq("course_id", courseId);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setSessions(data || []);
+  };
+
+  loadSessions();
+}, [courseId]);
 
   useEffect(() => {
     if (!courseId) return;
@@ -54,18 +73,17 @@ export default function TeacherSessionPage() {
       return;
     }
 
-    if (!sessionTitle.trim() || !sessionCode.trim()) {
-      alert("Please fill in Session Title and Session Code.");
-      return;
-    }
-
+   if (!sessionTitle.trim()) {
+  alert("Please fill in Session Title.");
+  return;
+}
     setCreating(true);
 
 const { data, error } = await supabase
   .from("ew_classes")
   .insert({
     activity_title: sessionTitle.trim(),
-    class_code: sessionCode.trim(),
+    class_code: `session-${Date.now()}`,
     join_password: "course-only",
     teacher_id: "eguchi",
     status: "active",
@@ -94,7 +112,7 @@ const { data, error } = await supabase
 
   return (
     <div className="min-h-screen bg-gray-50 p-8 text-black">
-      <div className="mx-auto max-w-4xl space-y-8">
+      <div className="mx-auto max-w-2xl space-y-6">
         <div className="rounded-2xl border bg-white p-6 shadow">
           <div className="mb-4 flex items-center justify-between">
             <h1 className="text-2xl font-bold">Session Making</h1>
@@ -119,6 +137,24 @@ const { data, error } = await supabase
             </div>
           )}
 
+         {sessions.length > 0 && (
+  <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+    <p className="text-sm font-medium text-gray-700">Existing Sessions</p>
+    <div className="mt-2 flex flex-wrap gap-2">
+      {sessions.map((s, i) => (
+        <button
+          key={s.id}
+          onClick={() =>
+            router.push(`/teacher/task?sessionId=${s.id}`)
+          }
+          className="rounded-full border border-gray-300 bg-white px-3 py-1 text-sm hover:bg-gray-100"
+        >
+          {i + 1}. {s.activity_title}
+        </button>
+      ))}
+    </div>
+  </div>
+)}
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="text-sm font-medium">Session Title</label>
@@ -127,16 +163,6 @@ const { data, error } = await supabase
                 onChange={(e) => setSessionTitle(e.target.value)}
                 className="mt-1 w-full rounded border p-2"
                 placeholder="1st Session"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Session Code</label>
-              <input
-                value={sessionCode}
-                onChange={(e) => setSessionCode(e.target.value)}
-                className="mt-1 w-full rounded border p-2"
-                placeholder="HS2021001"
               />
             </div>
           </div>
