@@ -160,12 +160,19 @@ export default function TeacherCoursePage() {
                       Sessions
                     </Link>
 
-                   <Link
-  href={`/teacher/roster?courseId=${course.id}`}
-  className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
->
-  Roster
-</Link>
+                    <Link
+                      href={`/teacher/roster?courseId=${course.id}`}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    >
+                      Roster
+                    </Link>
+
+                    <Link
+                      href={`/teacher/record/${course.id}`}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    >
+                      Record
+                    </Link>
                   </div>
                 </div>
               ))}

@@ -73,6 +73,8 @@ export default function TeacherTaskPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const [lastAIResponse, setLastAIResponse] = useState<string | null>(null);
 
+  const [checkingEnglish, setCheckingEnglish] = useState(false);
+
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -265,6 +267,50 @@ export default function TeacherTaskPage() {
     alert("Lane titles and prompts have been applied.");
   };
 
+  const handleCheckEnglish = async () => {
+    if (!taskTitle.trim()) {
+      alert("Please enter a task title first.");
+      return;
+    }
+
+    setCheckingEnglish(true);
+
+    try {
+      const res = await fetch("/api/check-english", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          taskTitle,
+          lanes,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+        alert("Error: " + data.error);
+        setCheckingEnglish(false);
+        return;
+      }
+
+      if (typeof data.taskTitle === "string") {
+        setTaskTitle(data.taskTitle);
+      }
+
+      if (Array.isArray(data.lanes)) {
+        setLanes(data.lanes);
+      }
+
+      alert("English has been checked and updated.");
+    } catch (error) {
+      alert("Failed to check English.");
+    }
+
+    setCheckingEnglish(false);
+  };
+
   const handleSaveTask = async () => {
     if (!sessionId) {
       alert("No session selected.");
@@ -355,21 +401,20 @@ export default function TeacherTaskPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Task Setup</h1>
             <p className="mt-1 text-base text-slate-500">
-              {session
-                ? `${session.activity_title}`
-                : "Loading session..."}
+              {session ? `${session.activity_title}` : "Loading session..."}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            {sessionId && (
+            {session ? (
               <Link
-                href={`/teacher/record?sessionId=${sessionId}`}
+                href={`/teacher/record/${session.course_id}/${session.id}`}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
               >
-                Record
+                Session Record
               </Link>
-            )}
+            ) : null}
+
             <Link
               href="/teacher/course"
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
@@ -380,7 +425,6 @@ export default function TeacherTaskPage() {
         </div>
 
         <div ref={splitRef} className="flex gap-4">
-          {/* Left side */}
           <div style={{ width: leftWidth }} className="flex-shrink-0 space-y-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-bold uppercase tracking-wide text-slate-500">
@@ -420,9 +464,19 @@ export default function TeacherTaskPage() {
                 {tasks.map((task, i) => (
                   <div
                     key={task.id}
-                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700"
+                    className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700"
                   >
-                    {i + 1}. {task.task_title}
+                    <span>
+                      {i + 1}. {task.task_title}
+                    </span>
+                    {session?.course_id && (
+                      <Link
+                        href={`/teacher/record/${session.course_id}/${sessionId}/${task.id}`}
+                        className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      >
+                        Task Record
+                      </Link>
+                    )}
                   </div>
                 ))}
               </div>
@@ -565,21 +619,29 @@ export default function TeacherTaskPage() {
             </section>
           </div>
 
-          {/* Divider */}
           <div
             onMouseDown={handleMouseDown}
             className="w-2 self-stretch cursor-col-resize rounded-full bg-slate-300 transition hover:bg-slate-400"
           />
 
-          {/* Right side */}
           <section className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4">
-              <h2 className="text-2xl font-bold text-slate-900">
-                Lane Configuration
-              </h2>
-              <p className="mt-1 text-base text-slate-500">
-                Review and adjust lane titles and prompts before saving.
-              </p>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">
+                  Lane Configuration
+                </h2>
+                <p className="mt-1 text-base text-slate-500">
+                  Review and adjust lane titles and prompts before saving.
+                </p>
+              </div>
+
+              <button
+                onClick={handleCheckEnglish}
+                disabled={checkingEnglish}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-slate-400"
+              >
+                {checkingEnglish ? "Checking..." : "Check English"}
+              </button>
             </div>
 
             <div className="max-h-[72vh] overflow-y-auto pr-2">
@@ -637,7 +699,6 @@ export default function TeacherTaskPage() {
             </button>
           </section>
 
-          {/* Right expansion bar */}
           <div
             onMouseDown={handleRightMouseDown}
             className="w-2 self-stretch cursor-col-resize rounded-full bg-slate-300 transition hover:bg-slate-400"

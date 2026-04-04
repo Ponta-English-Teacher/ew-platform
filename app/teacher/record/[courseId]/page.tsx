@@ -31,6 +31,7 @@ type JoinedStudentRow = {
 type PostRow = {
   class_id: string;
   student_id: string; // actually ew_students.id
+  content: string;
 };
 
 type TaskRow = {
@@ -44,6 +45,7 @@ type StudentContributionRow = {
   sessions_joined: number;
   attendance_rate: number;
   total_posts: number;
+  total_words: number;
 };
 
 type SessionSummaryRow = {
@@ -71,6 +73,7 @@ function CourseRecordContent() {
 
   const [studentRows, setStudentRows] = useState<StudentContributionRow[]>([]);
   const [sessionRows, setSessionRows] = useState<SessionSummaryRow[]>([]);
+  const [sortBy, setSortBy] = useState<"id" | "posts" | "words">("id");
 
   useEffect(() => {
     if (!courseId) return;
@@ -138,19 +141,17 @@ function CourseRecordContent() {
 
       const { data: postData } = await supabase
         .from("ew_posts")
-        .select("class_id, student_id")
+        .select("class_id, student_id, content")
         .in("class_id", sessionIds);
 
       const posts = (postData || []) as PostRow[];
       setTotalPosts(posts.length);
 
-      // Map internal ew_students.id -> real student_id
       const internalIdToRealStudentId = new Map<string, string>();
       joinedStudents.forEach((row) => {
         internalIdToRealStudentId.set(row.id, row.student_id);
       });
 
-      // Count active students by real student ID, not internal UUID
       const activeRealStudentIds = new Set<string>();
       posts.forEach((post) => {
         const realStudentId = internalIdToRealStudentId.get(post.student_id);
@@ -208,7 +209,12 @@ function CourseRecordContent() {
         const studentPosts = posts.filter((post) => {
           const realStudentId = internalIdToRealStudentId.get(post.student_id);
           return realStudentId === student.student_id;
-        }).length;
+        });
+
+        const totalWords = studentPosts.reduce((sum, post) => {
+          if (!post.content || !post.content.trim()) return sum;
+          return sum + post.content.trim().split(/\s+/).length;
+        }, 0);
 
         const studentAttendanceRate =
           sessions.length > 0
@@ -220,12 +226,20 @@ function CourseRecordContent() {
           real_name: student.real_name,
           sessions_joined: sessionsJoined,
           attendance_rate: studentAttendanceRate,
-          total_posts: studentPosts,
+          total_posts: studentPosts.length,
+          total_words: totalWords,
         };
       });
 
       contributionRows.sort((a, b) => {
-        if (b.total_posts !== a.total_posts) return b.total_posts - a.total_posts;
+        if (sortBy === "id") {
+          return a.student_id.localeCompare(b.student_id);
+        }
+        if (sortBy === "posts") {
+          if (b.total_posts !== a.total_posts) return b.total_posts - a.total_posts;
+          return a.student_id.localeCompare(b.student_id);
+        }
+        if (b.total_words !== a.total_words) return b.total_words - a.total_words;
         return a.student_id.localeCompare(b.student_id);
       });
 
@@ -234,7 +248,7 @@ function CourseRecordContent() {
     };
 
     load();
-  }, [courseId]);
+  }, [courseId, sortBy]);
 
   if (loading) {
     return <div className="p-8 text-gray-500">Loading course record...</div>;
@@ -244,96 +258,190 @@ function CourseRecordContent() {
     return <div className="p-8 text-gray-500">Course not found.</div>;
   }
 
+  const handleExportCsv = () => {
+    const headers = [
+      "Student ID",
+      "Name",
+      "Sessions Joined",
+      "Attendance Rate",
+      "Total Posts",
+      "Total Words",
+    ];
+
+    const rows = studentRows.map((row) => [
+      row.student_id,
+      row.real_name,
+      String(row.sessions_joined),
+      `${row.attendance_rate}%`,
+      String(row.total_posts),
+      String(row.total_words),
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n");
+
+    const safeTitle = course.course_title.replace(/[\\/:*?"<>|]/g, "_");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `${safeTitle}-course-record.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6 text-black">
       <div className="mx-auto max-w-7xl space-y-8">
-        <div>
-          <p className="text-base text-gray-500">Course Performance Record</p>
-          <h1 className="mt-2 text-4xl font-bold">{course.course_title}</h1>
-          <p className="mt-2 text-2xl text-gray-500">{course.course_code}</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-base text-gray-500">Course Performance Record</p>
+            <h1 className="mt-2 text-4xl font-bold">{course.course_title}</h1>
+            <p className="mt-2 text-2xl text-gray-500">{course.course_code}</p>
+          </div>
+
+          <button
+            onClick={handleExportCsv}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Export CSV
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-6 xl:grid-cols-6">
-  <div className="rounded-2xl bg-blue-50 p-6 shadow-sm">
-    <p className="text-lg text-blue-700">Registered Students</p>
-    <p className="mt-2 text-6xl font-bold text-blue-900">{registeredStudents}</p>
-  </div>
+          <div className="rounded-2xl bg-blue-50 p-6 shadow-sm">
+            <p className="text-lg text-blue-700">Registered Students</p>
+            <p className="mt-2 text-6xl font-bold text-blue-900">
+              {registeredStudents}
+            </p>
+          </div>
 
-  <div className="rounded-2xl bg-green-50 p-6 shadow-sm">
-    <p className="text-lg text-green-700">Active Students</p>
-    <p className="mt-2 text-6xl font-bold text-green-900">{activeStudents}</p>
-  </div>
+          <div className="rounded-2xl bg-green-50 p-6 shadow-sm">
+            <p className="text-lg text-green-700">Active Students</p>
+            <p className="mt-2 text-6xl font-bold text-green-900">
+              {activeStudents}
+            </p>
+          </div>
 
-  <div className="rounded-2xl bg-purple-50 p-6 shadow-sm">
-    <p className="text-lg text-purple-700">Attendance</p>
-    <p className="mt-2 text-6xl font-bold text-purple-900">{attendanceRate}%</p>
-  </div>
+          <div className="rounded-2xl bg-purple-50 p-6 shadow-sm">
+            <p className="text-lg text-purple-700">Attendance</p>
+            <p className="mt-2 text-6xl font-bold text-purple-900">
+              {attendanceRate}%
+            </p>
+          </div>
 
-  <div className="rounded-2xl bg-orange-50 p-6 shadow-sm">
-    <p className="text-lg text-orange-700">Sessions</p>
-    <p className="mt-2 text-6xl font-bold text-orange-900">{numberOfSessions}</p>
-  </div>
+          <div className="rounded-2xl bg-orange-50 p-6 shadow-sm">
+            <p className="text-lg text-orange-700">Sessions</p>
+            <p className="mt-2 text-6xl font-bold text-orange-900">
+              {numberOfSessions}
+            </p>
+          </div>
 
-  <div className="rounded-2xl bg-pink-50 p-6 shadow-sm">
-    <p className="text-lg text-pink-700">Tasks</p>
-    <p className="mt-2 text-6xl font-bold text-pink-900">{totalTasks}</p>
-  </div>
+          <div className="rounded-2xl bg-pink-50 p-6 shadow-sm">
+            <p className="text-lg text-pink-700">Tasks</p>
+            <p className="mt-2 text-6xl font-bold text-pink-900">
+              {totalTasks}
+            </p>
+          </div>
 
-  <div className="rounded-2xl bg-gray-100 p-6 shadow-sm">
-    <p className="text-lg text-gray-700">Posts</p>
-    <p className="mt-2 text-6xl font-bold text-gray-900">{totalPosts}</p>
-  </div>
-</div>
+          <div className="rounded-2xl bg-gray-100 p-6 shadow-sm">
+            <p className="text-lg text-gray-700">Posts</p>
+            <p className="mt-2 text-6xl font-bold text-gray-900">
+              {totalPosts}
+            </p>
+          </div>
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-  <div className="border-b border-gray-100 px-6 py-4">
-    <h2 className="text-2xl font-semibold">Course Student Contributions</h2>
-  </div>
-
-  {studentRows.length === 0 ? (
-    <p className="px-6 py-6 text-base text-gray-400">
-      No student contribution data yet.
-    </p>
-  ) : (
-    <table className="w-full text-xl">
-      <thead>
-        <tr className="border-b border-gray-100 bg-slate-50 text-left text-base text-slate-600">
-          <th className="px-6 py-4 font-semibold">Student ID</th>
-          <th className="px-6 py-4 font-semibold">Name</th>
-          <th className="px-6 py-4 text-center font-semibold">Sessions Joined</th>
-          <th className="px-6 py-4 text-center font-semibold">Attendance Rate</th>
-          <th className="px-6 py-4 text-center font-semibold">Total Posts</th>
-        </tr>
-      </thead>
-      <tbody>
-        {studentRows.map((row, index) => (
-          <tr
-            key={row.student_id}
-            className={`border-b border-gray-100 last:border-0 ${
-              index === 0 ? "bg-amber-50" : "bg-white"
-            }`}
-          >
-            <td className="px-6 py-5 font-semibold">{row.student_id}</td>
-            <td className="px-6 py-5">
-              <div className="flex items-center gap-3">
-                {index === 0 && (
-                  <span className="rounded-full bg-amber-200 px-3 py-1 text-sm font-bold text-amber-900">
-                    Top
-                  </span>
-                )}
-                <span>{row.real_name}</span>
+          <div className="border-b border-gray-100 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-semibold">Course Student Contributions</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">Sort by</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) =>
+                    setSortBy(e.target.value as "id" | "posts" | "words")
+                  }
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                >
+                  <option value="id">Student ID</option>
+                  <option value="posts">Total Posts</option>
+                  <option value="words">Total Words</option>
+                </select>
               </div>
-            </td>
-            <td className="px-6 py-5 text-center text-2xl">{row.sessions_joined}</td>
-            <td className="px-6 py-5 text-center text-2xl">{row.attendance_rate}%</td>
-            <td className="px-6 py-5 text-center text-3xl font-bold">
-              {row.total_posts}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )}
-</div>
+            </div>
+          </div>
+
+          {studentRows.length === 0 ? (
+            <p className="px-6 py-6 text-base text-gray-400">
+              No student contribution data yet.
+            </p>
+          ) : (
+            <table className="w-full text-xl">
+              <thead>
+                <tr className="border-b border-gray-100 bg-slate-50 text-left text-base text-slate-600">
+                  <th className="px-6 py-4 font-semibold">Student ID</th>
+                  <th className="px-6 py-4 font-semibold">Name</th>
+                  <th className="px-6 py-4 text-center font-semibold">
+                    Sessions Joined
+                  </th>
+                  <th className="px-6 py-4 text-center font-semibold">
+                    Attendance Rate
+                  </th>
+                  <th className="px-6 py-4 text-center font-semibold">
+                    Total Posts
+                  </th>
+                  <th className="px-6 py-4 text-center font-semibold">
+                    Total Words
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentRows.map((row, index) => (
+                  <tr
+                    key={row.student_id}
+                    className={`border-b border-gray-100 last:border-0 ${
+                      index === 0 && sortBy !== "id" ? "bg-amber-50" : "bg-white"
+                    }`}
+                  >
+                    <td className="px-6 py-5 font-semibold">{row.student_id}</td>
+                    <td className="px-6 py-5">
+                      <div className="flex items-center gap-3">
+                        {index === 0 && sortBy !== "id" && (
+                          <span className="rounded-full bg-amber-200 px-3 py-1 text-sm font-bold text-amber-900">
+                            Top
+                          </span>
+                        )}
+                        <span>{row.real_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-5 text-center text-2xl">
+                      {row.sessions_joined}
+                    </td>
+                    <td className="px-6 py-5 text-center text-2xl">
+                      {row.attendance_rate}%
+                    </td>
+                    <td className="px-6 py-5 text-center text-3xl font-bold">
+                      {row.total_posts}
+                    </td>
+                    <td className="px-6 py-5 text-center text-3xl font-bold">
+                      {row.total_words}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-6 py-4">
             <h2 className="text-2xl font-semibold">Sessions</h2>
@@ -347,8 +455,12 @@ function CourseRecordContent() {
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-sm text-gray-500">
                   <th className="px-6 py-4 font-medium">Session</th>
                   <th className="px-6 py-4 font-medium">Code</th>
-                  <th className="px-6 py-4 text-center font-medium">Participants</th>
-                  <th className="px-6 py-4 text-center font-medium">Attendance</th>
+                  <th className="px-6 py-4 text-center font-medium">
+                    Participants
+                  </th>
+                  <th className="px-6 py-4 text-center font-medium">
+                    Attendance
+                  </th>
                   <th className="px-6 py-4 text-center font-medium">Posts</th>
                   <th className="px-6 py-4 font-medium"></th>
                 </tr>
@@ -359,10 +471,14 @@ function CourseRecordContent() {
                     key={row.id}
                     className="border-b border-gray-100 last:border-0"
                   >
-                    <td className="px-6 py-5 font-medium">{row.activity_title}</td>
+                    <td className="px-6 py-5 font-medium">
+                      {row.activity_title}
+                    </td>
                     <td className="px-6 py-5 text-gray-500">{row.class_code}</td>
                     <td className="px-6 py-5 text-center">{row.participants}</td>
-                    <td className="px-6 py-5 text-center">{row.attendance_rate}%</td>
+                    <td className="px-6 py-5 text-center">
+                      {row.attendance_rate}%
+                    </td>
                     <td className="px-6 py-5 text-center text-xl font-semibold">
                       {row.total_posts}
                     </td>
